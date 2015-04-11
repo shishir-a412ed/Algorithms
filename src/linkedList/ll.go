@@ -3,18 +3,18 @@ package linkedList
 import "fmt"
 
 type Node struct {
-	Data int
+	Data interface{}
 	Next *Node
 }
 
-func createNode(data int, head *Node) *Node {
+func createNode(data interface{}, head *Node) *Node {
 	head = new(Node)
 	head.Data = data
 	head.Next = nil
 	return head
 }
 
-func AppendNode(data int, head *Node) *Node {
+func AppendNode(data interface{}, head *Node) *Node {
 	if head == nil {
 		head = createNode(data, head)
 	} else {
