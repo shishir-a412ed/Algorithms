@@ -8,12 +8,9 @@ if [ "$USER" != "root" ];then
 	exit 
 fi
 
-if [ -z "$1" ];then
-	echo "See 'containers-migrate --help'"
-	exit
-fi
+NUMARGS=$#
 
-if [ "$1" = "--help" ];then 
+if [ $NUMARGS -eq 0 ] || [ "$1" = "--help" ];then 
 	echo "Usage: containers-migrate COMMAND [OPTIONS]"
 	echo -e "       containers-migrate [--help]\n"
 	echo -e "A self-sufficient tool for migrating docker containers from one backend storage to another\n"
@@ -33,11 +30,12 @@ if [ "$1" = "export" ];then
    elif [ "$2" = "--help" ];then
 	echo -e "\nUsage: containers-migrate export [OPTIONS]\n"
 	echo -e "Export a container from an existing storage\n"
-	echo "--container-id   ID of the container to be exported." 
-	echo "--graph   	 Root of the Docker runtime."
+	echo "--container-id      ID of the container to be exported" 
+	echo "--graph   	    Root of the Docker runtime (Default: /var/lib/docker)"
+	echo "--export-location   Path for exporting the container (Default: /var/lib/docker-migrate)"
 	exit
    else
-	container_export $2 $3
+	container_export $2 $3 $4
 	echo "Container exported succesfully"
    fi
 fi
@@ -52,11 +50,12 @@ if [ "$1" = "import" ];then
    elif [ "$2" = "--help" ];then
         echo -e "\nUsage: containers-migrate import [OPTIONS]\n"
         echo -e "Import a container into a new storage\n"
-        echo "--container-id   ID of the container to be imported." 
-        echo "--graph          Root of the Docker runtime."
+        echo "--container-id      ID of the container to be imported" 
+        echo "--graph             Root of the Docker runtime (Default: /var/lib/docker)"
+	echo "--import-location   Path for importing the container (Default: /var/lib/docker-migrate)"
         exit
    else
-        container_import $2 $3
+        container_import $2 $3 $4
         echo "Container imported succesfully"
    fi
 fi
@@ -64,30 +63,57 @@ fi
 }
 
 container_export(){
-	containerID="$1"
-        dockerPid=$(ps aux|grep docker|awk 'NR==1{print $2}')
+	for arg in "$@"
+	do 
+		flag=$(echo $arg|cut -d'=' -f 1)
+		val=$(echo $arg|cut -d'=' -f 2)
+		case "$flag" in
+			--container-id)
+				containerID=$val
+			;;
+			--graph)
+				dockerRootDir=$val
+			;;
+			--export-location)
+				exportPath=$val
+			;;
+		esac
+	done
+
+	if [ -z "$containerID" ]; then
+		echo "--container-id cannot be null"
+		exit
+	fi
+
+	if [ -z "$exportPath" ]; then
+		exportPath="/var/lib/docker-migrate"
+	fi
+
+        dockerPid=$(ps aux|grep [d]ocker|awk 'NR==1{print $2}')
         dockerCmdline=$(cat /proc/$dockerPid/cmdline)
         if [[ $dockerCmdline =~ "-g=" ]] || [[ $dockerCmdline =~ "-g/" ]] || [[ $dockerCmdline =~ "--graph" ]];then
-                if [ -z "$2" ];then
+                if [ -z "$dockerRootDir" ];then
                         echo "Docker is not located at the default (/var/lib/docker) root location."
                         echo "Please provide the new root location of the docker runtime in --graph option."
-                else
-                        dockerRootDir="$2"
+        		exit 1
                 fi
         else
                 dockerRootDir="/var/lib/docker"
         fi
-        notruncContainerID=$(sudo docker ps -aq --no-trunc|grep $containerID)
-        tmpDir=$dockerRootDir/tmp/docker-migrate-$containerID
-        mkdir $tmpDir
+        notruncContainerID=$(docker ps -aq --no-trunc|grep $containerID)
+        tmpDir=$exportPath/migrate-$containerID
+        mkdir -p $tmpDir
         cd $tmpDir
-	echo $dockerRootDir>dockerRootDir.txt
-        tar -cf container-metadata.tar $dockerRootDir/containers/$notruncContainerID 2> /dev/null
+	containerBaseImageID=$(docker inspect --format '{{.Image}}' $containerID)
+	echo $dockerRootDir>dockerInfo.txt
+	echo $containerBaseImageID>>dockerInfo.txt
+	echo $notruncContainerID>>dockerInfo.txt
+        /tmp/tar -cf container-metadata.tar $dockerRootDir/containers/$notruncContainerID 2> /dev/null
         imageID=$(docker commit $containerID)
         mkdir $tmpDir/temp
         docker save $imageID > $tmpDir/temp/image.tar
-        cd $tmpDir/temp
-        tar -xf image.tar
+	cd $tmpDir/temp
+        /tmp/tar -xf image.tar
         cd $tmpDir/temp/$imageID
         cp layer.tar $tmpDir/container-diff.tar
         cd $tmpDir
@@ -96,7 +122,54 @@ container_export(){
 }
 
 container_import(){
-	echo "Container imported successfully"
+	for arg in "$@"
+        do
+                flag=$(echo $arg|cut -d'=' -f 1)
+                val=$(echo $arg|cut -d'=' -f 2)
+                case "$flag" in
+                        --container-id)
+                                containerID=$val
+                        ;;
+                        --graph)
+                                dockerRootDir=$val
+                        ;;
+                        --import-location)
+                                importPath=$val
+                        ;;
+                esac
+        done
+
+        if [ -z "$containerID" ]; then
+                echo "--container-id cannot be null"
+                exit
+        fi
+
+        if [ -z "$importPath" ]; then
+                importPath="/var/lib/docker-migrate"
+        fi
+
+	dockerPid=$(ps aux|grep [d]ocker|awk 'NR==1{print $2}')
+        dockerCmdline=$(cat /proc/$dockerPid/cmdline)
+        if [[ $dockerCmdline =~ "-g=" ]] || [[ $dockerCmdline =~ "-g/" ]] || [[ $dockerCmdline =~ "--graph" ]];then
+                if [ -z "$dockerRootDir" ];then
+                        echo "Docker is not located at the default (/var/lib/docker) root location."
+                        echo "Please provide the new root location of the docker runtime in --graph option."
+                        exit 1
+                fi
+        else
+                dockerRootDir="/var/lib/docker"
+        fi
+
+	cd $importPath/migrate-$container-ID
+	dockerBaseImageID=$(sed -n '2p' dockerInfo.txt)	
+	cat container-diff.tar|docker run -i -v /tmp/tar:/tmp/tar $dockerBaseImageID /tmp/tar -xf -
+	newContainerID=$(docker ps -lq)
+	newNotruncContainerID=$(docker ps -aq --no-trunc|grep $newContainerID)					
+	cd $dockerRootDir/containers/$newNotruncContainerID
+	rm -rf *
+	cp $importPath/migrate-$container-ID/container-metadata.tar .
+	/tmp/tar -xf container-metadata.tar	
+
 }
 
 main "$@"
