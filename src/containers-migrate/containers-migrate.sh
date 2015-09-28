@@ -1,6 +1,6 @@
 #!/bin/bash
 # bash script to migrate containers from one backend storage to another.
-
+set -e
 
 main() {
 if [ "$USER" != "root" ];then
@@ -36,7 +36,6 @@ if [ "$1" = "export" ];then
 	exit
    else
 	container_export $2 $3 $4
-	echo "Container exported succesfully"
    fi
 fi
 
@@ -56,7 +55,6 @@ if [ "$1" = "import" ];then
         exit
    else
         container_import $2 $3 $4
-        echo "Container imported succesfully"
    fi
 fi
 
@@ -82,7 +80,7 @@ container_export(){
 
 	if [ -z "$containerID" ]; then
 		echo "--container-id cannot be null"
-		exit
+		exit 1
 	fi
 
 	if [ -z "$exportPath" ]; then
@@ -90,7 +88,7 @@ container_export(){
 	fi
 
         dockerPid=$(ps aux|grep [d]ocker|awk 'NR==1{print $2}')
-        dockerCmdline=$(cat /proc/$dockerPid/cmdline)
+        dockerCmdline=$(cat /proc/$dockerPid/cmdline)||exit 1
         if [[ $dockerCmdline =~ "-g=" ]] || [[ $dockerCmdline =~ "-g/" ]] || [[ $dockerCmdline =~ "--graph" ]];then
                 if [ -z "$dockerRootDir" ];then
                         echo "Docker is not located at the default (/var/lib/docker) root location."
@@ -100,25 +98,26 @@ container_export(){
         else
                 dockerRootDir="/var/lib/docker"
         fi
-        notruncContainerID=$(docker ps -aq --no-trunc|grep $containerID)
+        notruncContainerID=$(docker ps -aq --no-trunc|grep $containerID)||exit 1
         tmpDir=$exportPath/migrate-$containerID
         mkdir -p $tmpDir
         cd $tmpDir
-	containerBaseImageID=$(docker inspect --format '{{.Image}}' $containerID)
+	containerBaseImageID=$(docker inspect --format '{{.Image}}' $containerID)||exit 1
 	echo $dockerRootDir>dockerInfo.txt
 	echo $containerBaseImageID>>dockerInfo.txt
 	echo $notruncContainerID>>dockerInfo.txt
         /tmp/tar -cf container-metadata.tar $dockerRootDir/containers/$notruncContainerID 2> /dev/null
-        imageID=$(docker commit $containerID)
+        imageID=$(docker commit $containerID)||exit 1
         mkdir $tmpDir/temp
-        docker save $imageID > $tmpDir/temp/image.tar
+        docker save $imageID > $tmpDir/temp/image.tar||exit 1
 	cd $tmpDir/temp
         /tmp/tar -xf image.tar
         cd $tmpDir/temp/$imageID
         cp layer.tar $tmpDir/container-diff.tar
         cd $tmpDir
         rm -rf temp
-        docker rmi -f $imageID 1>/dev/null
+        docker rmi -f $imageID 1>/dev/null||exit 1
+	echo "Container exported succesfully"
 }
 
 container_import(){
@@ -149,7 +148,7 @@ container_import(){
         fi
 
 	dockerPid=$(ps aux|grep [d]ocker|awk 'NR==1{print $2}')
-        dockerCmdline=$(cat /proc/$dockerPid/cmdline)
+        dockerCmdline=$(cat /proc/$dockerPid/cmdline)||exit 1
         if [[ $dockerCmdline =~ "-g=" ]] || [[ $dockerCmdline =~ "-g/" ]] || [[ $dockerCmdline =~ "--graph" ]];then
                 if [ -z "$dockerRootDir" ];then
                         echo "Docker is not located at the default (/var/lib/docker) root location."
@@ -160,15 +159,35 @@ container_import(){
                 dockerRootDir="/var/lib/docker"
         fi
 
-	cd $importPath/migrate-$container-ID
-	dockerBaseImageID=$(sed -n '2p' dockerInfo.txt)	
+	cd $importPath/migrate-$containerID
+	dockerBaseImageID=$(sed -n '2p' dockerInfo.txt)||exit 1	
 	cat container-diff.tar|docker run -i -v /tmp/tar:/tmp/tar $dockerBaseImageID /tmp/tar -xf -
-	newContainerID=$(docker ps -lq)
-	newNotruncContainerID=$(docker ps -aq --no-trunc|grep $newContainerID)					
+	newContainerID=$(docker ps -lq)||exit 1
+	newContainerName=$(docker inspect -f '{{.Name}}' $newContainerID)||exit 1
+	newNotruncContainerID=$(docker ps -aq --no-trunc|grep $newContainerID)||exit 1					
 	cd $dockerRootDir/containers/$newNotruncContainerID
 	rm -rf *
-	cp $importPath/migrate-$container-ID/container-metadata.tar .
+	cp $importPath/migrate-$containerID/container-metadata.tar .
 	/tmp/tar -xf container-metadata.tar	
+	rm container-metadata.tar
+	oldDockerRootDir=$(sed -n '1p' $importPath/migrate-$containerID/dockerInfo.txt)||exit 1
+	oldNotruncContainerID=$(sed -n '3p' $importPath/migrate-$containerID/dockerInfo.txt)||exit 1
+	cp -r ${oldDockerRootDir:1}/containers/$oldNotruncContainerID/* .
+	baseDir=$(echo $oldDockerRootDir|cut -d"/" -f 2)
+	rm -rf $baseDir
+
+	sed -i "s|$containerID|$newContainerID|g" config.json
+	sed -i "s|$oldNotruncContainerID|$newNotruncContainerID|g" config.json
+	sed -i "s|$oldDockerRootDir|$dockerRootDir|g" config.json
+
+	mv $oldNotruncContainerID-json.log $newNotruncContainerID-json.log
+
+	sed -i "s/$containerID/$newContainerID/g" hostname
+	sed -i "s/$containerID/$newContainerID/g" hosts
+	
+	echo "Container imported succesfully"
+	echo "New ID for the migrated container is:"
+	echo $newContainerID
 
 }
 
