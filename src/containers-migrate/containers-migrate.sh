@@ -176,18 +176,14 @@ container_import(){
 	baseDir=$(echo $oldDockerRootDir|cut -d"/" -f 2)
 	rm -rf $baseDir
 
-	sed -i "s|$containerID|$newContainerID|g" config.json
-	sed -i "s|$oldNotruncContainerID|$newNotruncContainerID|g" config.json
-	sed -i "s|$oldDockerRootDir|$dockerRootDir|g" config.json
+	cat config.json|jq --arg dockerRoot "$dockerRootDir" --arg oldContID "$oldNotruncContainerID" '.ResolvConfPath = $dockerRoot+"/containers/"+$oldContID+"/resolv.conf"|.HostnamePath = $dockerRoot+"/containers/"+$oldContID+"/hostname"|.HostsPath = $dockerRoot+"/containers/"+$oldContID+"/hosts"|.LogPath = $dockerRoot+"/containers/"+$oldContID+"/"+$oldContID+"-json.log"' --compact-output > config_temp.json
+	mv config_temp.json config.json
 
-	mv $oldNotruncContainerID-json.log $newNotruncContainerID-json.log
-
-	sed -i "s/$containerID/$newContainerID/g" hostname
-	sed -i "s/$containerID/$newContainerID/g" hosts
+	cd $dockerRootDir
+	find . -name "*$newNotruncContainerID*" -type d -exec rename $newNotruncContainerID $oldNotruncContainerID {} +
+	find . -name "*$newNotruncContainerID*" -type f -exec rename $newNotruncContainerID $oldNotruncContainerID {} +
 	
 	echo "Container imported succesfully"
-	echo "New ID for the migrated container is:"
-	echo $newContainerID
 
 }
 
