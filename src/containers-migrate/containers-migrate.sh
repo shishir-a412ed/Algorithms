@@ -176,15 +176,13 @@ container_import(){
 	baseDir=$(echo $oldDockerRootDir|cut -d"/" -f 2)
 	rm -rf $baseDir
 
-	cat config.json|jq --arg dockerRoot "$dockerRootDir" --arg oldContID "$oldNotruncContainerID" '.ResolvConfPath = $dockerRoot+"/containers/"+$oldContID+"/resolv.conf"|.HostnamePath = $dockerRoot+"/containers/"+$oldContID+"/hostname"|.HostsPath = $dockerRoot+"/containers/"+$oldContID+"/hosts"|.LogPath = $dockerRoot+"/containers/"+$oldContID+"/"+$oldContID+"-json.log"' --compact-output > config_temp.json
-	mv config_temp.json config.json
+	sed -i "s|$oldDockerRootDir/containers/$oldNotruncContainerID|$dockerRootDir/containers/$oldNotruncContainerID|g" config.json
 
 	cd $dockerRootDir
 	find . -name "*$newNotruncContainerID*" -type d -exec rename $newNotruncContainerID $oldNotruncContainerID {} +
 	find . -name "*$newNotruncContainerID*" -type f -exec rename $newNotruncContainerID $oldNotruncContainerID {} +
 	
 	echo "Container imported succesfully"
-
 }
 
 main "$@"
