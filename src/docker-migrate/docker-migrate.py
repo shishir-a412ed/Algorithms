@@ -56,20 +56,16 @@ def export_images(exportDir):
         splitImages = images.split()[7:]  # cut off the headers
         names = []
         tags = []
-        ids = []
         for i in range(0, len(splitImages)):
             # only take the image and its tags and the image ID (to help in the <none>:<none> case)
             if (i % 8 == 0):
                 names.append(splitImages[i])
                 tags.append(splitImages[i+1])
-                ids.append(splitImages[i+2])
         for i in range(0, len(names)):
             print("Saving image {0}:{1}".format(names[i], tags[i]))
             if names[i] == '<none>':
-                subprocess.call(
-                    "docker save {0} > {1}/images/{0}-{0}.tar".format(
-                        ids[i], exportDir), shell=True)
-            else:
+            	print("This is a dangling image and will not be exported")
+	    else:
                 subprocess.call(
                     "docker save {0}:{1} > {2}/images/{3}-{4}.tar".format(
                       	names[i], tags[i], exportDir, names[i].replace("/", "~"), tags[i].replace("/", "~")), shell=True)
