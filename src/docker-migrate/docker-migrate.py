@@ -3,30 +3,52 @@
 import sys
 import os
 import subprocess
-
+import argparse
 
 def main():
 	if len(sys.argv) == 1:
-		show_help()
-	elif len(sys.argv) == 2 and sys.argv[1] == "help":
-		show_help()
+		sys.exit("""
+	docker-migrate: too few arguments.
+	Try 'docker-migrate --help' for more information.
+	""")
+
+	parser = argparse.ArgumentParser(description='docker migrate')
+	subparsers = parser.add_subparsers(help="commands")
+
+	exportp = subparsers.add_parser("export", help="export a docker instance",
+        	epilog="export a docker instance."
+        	"The export command would export docker images, containers and volumes. ")
+	exportp.set_defaults(which='exportp')
+
+	importp = subparsers.add_parser("import", help="import a docker instance",
+        	epilog="import a docker instance."
+        	"The import command would import docker images, containers and volumes. ")
+	importp.set_defaults(which='importp')
+
+	exportp.add_argument("--graph", dest="graph", default="/var/lib/docker",
+                        help="Root of the Docker runtime (Default: /var/lib/docker)")
+	exportp.add_argument("--export-location", dest="export_location", default="/var/lib/docker-migrate",
+                        help="Path for exporting docker (Default: /var/lib/docker-migrate)")
+
+	importp.add_argument("--graph", dest="graph", default="/var/lib/docker",
+                        help="Root of the Docker runtime (Default: /var/lib/docker)")
+	importp.add_argument("--import-location", dest="import_location", default="/var/lib/docker-migrate",
+                        help="Path for importing docker (Default: /var/lib/docker-migrate)")
+
+	args = parser.parse_args()
+	print(args)
+	exit("success")
 
 	if os.geteuid() != 0:
+		os.system("clear")
                 exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
 
-	if len(sys.argv) == 2 and sys.argv[1] == "export":
-		exportDir = "/var/lib/docker-migrate"
-		export_docker(exportDir)		
-	elif len(sys.argv) == 3 and sys.argv[1] == "export":
-		exportDir = sys.argv[2]
-		export_docker(exportDir)
-	elif len(sys.argv) == 2 and sys.argv[1] == "import":
-                importDir = "/var/lib/docker-migrate"
-                import_docker(importDir)
-        elif len(sys.argv) == 3 and sys.argv[1] == "import":
-                importDir = sys.argv[2]
-                import_docker(importDir)	
-		
+	if args.which == "exportp":
+		export_docker(args.graph, args.export_location)		
+	elif args.which == "importp":	
+		import_docker(args.graph, args.import_location)
+
+
 def export_docker(exportDir):
 	if not os.path.isdir(exportDir):
 		os.mkdir(exportDir)
@@ -98,41 +120,6 @@ def import_volumes(importDir):
         if os.path.isdir("/var/lib/docker/vfs"):
             subprocess.call(
                 "tar -xzvf {0}/volumes/vfsData.tar.gz -C /var/lib/docker/vfs > /dev/null".format(importDir), shell=True)
-
-def show_help():
-	os.system("clear")
-	sys.exit("""
-
-	DOCKER MIGRATE
-
-	This tool allows the user to easily migrate images, volumes, and
-        containers from one version of Docker to another. With this tool, 
-        users can quickly save all their data from the current docker
-        instance, change the docker storage backend, and then import all 
-        their old data to the new system.
-
-        ## ./docker-migrate export [directory]
-
-        Specify the directory in which to temporarily store the files (can be
-        an existing directory, or the command will create one). If no directory
-        is specified, `/var/lib/docker-migrate` would be used as default.
-
-        The export command will export all the current images, volumes, and
-        containers to the specified directory, in the /images, /volumes,
-        /containers subdirectories.
-
-        ## ./docker-migrate import [directory]
-
-        Specify the directory from which to read the files (must be an
-        existing directory).If no directory is specified, 
-        `/var/lib/docker-migrate` would be used as default.
-
-        The import command will import images, volumes, and containers from
-        the specified directory into the new docker instance.
-
-        Primary Author: Jenny Ramseyer, 2015
-        Secondary Author: Shishir Mahajan, 2015
-""")
 
 main()
 
